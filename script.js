@@ -81,8 +81,12 @@ let trustTimer;
 function insectScrollTo(id) {
   const el = document.getElementById(id);
   if (!el) return;
-  const targetY = el.getBoundingClientRect().top + window.scrollY;
-  window.scrollTo({ top: targetY, behavior: "instant" });
+  if (typeof lenis !== 'undefined') {
+    lenis.scrollTo(el, { duration: 1.2 });
+  } else {
+    const targetY = el.getBoundingClientRect().top + window.scrollY;
+    window.scrollTo({ top: targetY, behavior: "smooth" });
+  }
 }
 
 window.insectScrollTo = insectScrollTo;
@@ -142,20 +146,7 @@ function createHeroStars() {
   }
 }
 
-function syncHeroParallax() {
-  if (!heroVideo) return;
-  const shift = Math.min(window.scrollY * 0.2, 200);
-  heroVideo.style.setProperty("--hero-video-shift", `${shift}px`);
-}
-
-function syncExperienceScale() {
-  if (!experienceShell) return;
-  const rect = experienceShell.getBoundingClientRect();
-  const viewportHeight = window.innerHeight || 1;
-  const progress = 1 - Math.min(Math.abs(rect.top) / viewportHeight, 1);
-  const scale = 0.95 + progress * 0.1;
-  experienceShell.style.setProperty("--experience-scale", scale.toFixed(3));
-}
+// Scroll effects moved to GSAP below
 
 function setupExperienceVideo() {
   if (!experienceShell || !experienceVideo) return;
@@ -419,15 +410,7 @@ function setupStickyLayers() {
   }
 }
 
-function setupScrollEffects() {
-  const onScroll = () => {
-    syncHeroParallax();
-    syncExperienceScale();
-  };
-
-  onScroll();
-  window.addEventListener("scroll", onScroll, { passive: true });
-}
+// Setup scroll effects handled by GSAP below
 
 function setFooterYear() {
   if (!footerYear) return;
@@ -442,5 +425,269 @@ setupExperienceVideo();
 setupTestimonials();
 setupContactForm();
 setupStickyLayers();
-setupScrollEffects();
+// setupScrollEffects();
 setFooterYear();
+
+// --- 3D & DYNAMIC FEATURES (Lenis + GSAP) ---
+let lenis;
+if (typeof Lenis !== 'undefined') {
+  lenis = new Lenis({
+    duration: 1.2,
+    easing: (t) => Math.min(1, 1.001 - Math.pow(2, -10 * t)),
+    smooth: true,
+  });
+
+  function raf(time) {
+    lenis.raf(time);
+    requestAnimationFrame(raf);
+  }
+  requestAnimationFrame(raf);
+}
+
+if (typeof gsap !== 'undefined' && typeof ScrollTrigger !== 'undefined') {
+  gsap.registerPlugin(ScrollTrigger);
+
+  if (lenis) {
+    lenis.on('scroll', ScrollTrigger.update);
+    gsap.ticker.add((time) => {
+      lenis.raf(time * 1000);
+    });
+    gsap.ticker.lagSmoothing(0);
+  }
+
+  // Hero Parallax
+  gsap.to(".hero-video", {
+    yPercent: 30,
+    ease: "none",
+    scrollTrigger: {
+      trigger: ".hero",
+      start: "top top",
+      end: "bottom top",
+      scrub: true
+    }
+  });
+
+  // Fade Up Titles & Elements
+  gsap.utils.toArray('.display-title, .eyebrow').forEach(el => {
+    gsap.from(el, {
+      y: 60,
+      opacity: 0,
+      duration: 1.2,
+      ease: "power3.out",
+      scrollTrigger: {
+        trigger: el,
+        start: "top 85%",
+      }
+    });
+  });
+
+  // Image Scaling (Zoom-on-scroll) for 3D Feel
+  gsap.utils.toArray('.service-card img, .marquee img').forEach(img => {
+    gsap.fromTo(img, 
+      { scale: 0.85, transformOrigin: 'center center' },
+      {
+        scale: 1.15,
+        ease: "none",
+        scrollTrigger: {
+          trigger: img.closest('.service-card') || img,
+          start: "top bottom",
+          end: "bottom top",
+          scrub: true
+        }
+      }
+    );
+  });
+
+  // Experience video shell scaling
+  gsap.fromTo("#experience-video-shell",
+    { scale: 0.85, borderRadius: "20px" },
+    {
+      scale: 1,
+      borderRadius: "3px",
+      ease: "none",
+      scrollTrigger: {
+        trigger: "#experience",
+        start: "top bottom",
+        end: "center center",
+        scrub: true
+      }
+    }
+  );
+
+  // Parallax for Background Decorative elements
+  if(document.querySelector(".story-sphere")) {
+    gsap.to(".story-sphere", {
+      y: 300,
+      ease: "none",
+      scrollTrigger: {
+        trigger: ".story",
+        start: "top bottom",
+        end: "bottom top",
+        scrub: true
+      }
+    });
+  }
+
+  // Trust marquee parallax
+  if(document.querySelector(".trust-marquee")) {
+    gsap.to(".trust-marquee", {
+      y: -150,
+      ease: "none",
+      scrollTrigger: {
+        trigger: ".trust",
+        start: "top bottom",
+        end: "bottom top",
+        scrub: true
+      }
+    });
+  }
+
+  // Custom Cursor Logic
+  const cursor = document.getElementById('custom-cursor');
+  const cursorDot = document.getElementById('custom-cursor-dot');
+  if (cursor && cursorDot) {
+    window.addEventListener('mousemove', (e) => {
+      gsap.to(cursor, { x: e.clientX, y: e.clientY, duration: 0.15, ease: "power2.out" });
+      gsap.to(cursorDot, { x: e.clientX, y: e.clientY, duration: 0 });
+    });
+
+    document.querySelectorAll('button, a, select, input, textarea').forEach(el => {
+      el.addEventListener('mouseenter', () => cursor.classList.add('hover'));
+      el.addEventListener('mouseleave', () => cursor.classList.remove('hover'));
+    });
+  }
+
+  // 1. Velocity-Based Text Skewing
+  const skewTitles = gsap.utils.toArray('.display-title');
+  if (skewTitles.length > 0 && lenis) {
+    let proxy = { skew: 0 },
+        skewSetter = gsap.quickSetter(skewTitles, "skewY", "deg"),
+        clamp = gsap.utils.clamp(-5, 5);
+        
+    lenis.on('scroll', (e) => {
+      let skew = clamp(e.velocity * -0.2);
+      if (Math.abs(skew) > Math.abs(proxy.skew)) {
+        proxy.skew = skew;
+        gsap.to(proxy, {
+          skew: 0,
+          duration: 0.8,
+          ease: "power3",
+          overwrite: true,
+          onUpdate: () => skewSetter(proxy.skew)
+        });
+      }
+    });
+  }
+
+  // 2. Magnetic Buttons
+  const magnetics = document.querySelectorAll('.magnetic');
+  magnetics.forEach((btn) => {
+    btn.addEventListener('mousemove', (e) => {
+      const position = btn.getBoundingClientRect();
+      const x = e.clientX - position.left - position.width / 2;
+      const y = e.clientY - position.top - position.height / 2;
+      
+      gsap.to(btn, {
+        x: x * 0.3,
+        y: y * 0.3,
+        duration: 0.5,
+        ease: "power3.out"
+      });
+      if(cursor) {
+        gsap.to(cursor, {
+           x: position.left + position.width / 2 + (x * 0.1),
+           y: position.top + position.height / 2 + (y * 0.1),
+           duration: 0.2
+        });
+      }
+    });
+    
+    btn.addEventListener('mouseleave', () => {
+      gsap.to(btn, {
+        x: 0,
+        y: 0,
+        duration: 0.7,
+        ease: "elastic.out(1, 0.3)"
+      });
+    });
+  });
+
+  // 3. Mouse-Driven 3D Parallax Depth
+  const mouseParallaxEls = document.querySelectorAll('.mouse-parallax');
+  if(mouseParallaxEls.length > 0) {
+    window.addEventListener('mousemove', (e) => {
+      const x = (e.clientX / window.innerWidth - 0.5) * 2;
+      const y = (e.clientY / window.innerHeight - 0.5) * 2;
+      
+      mouseParallaxEls.forEach(el => {
+        const speed = el.dataset.parallaxSpeed || 20;
+        gsap.to(el, {
+          x: x * speed,
+          y: y * speed,
+          duration: 1.5,
+          ease: "power2.out"
+        });
+      });
+    });
+  }
+
+  // 4. Liquid Image Hover Distortion
+  const liquidDisplacement = document.getElementById('liquid-displacement');
+  const liquidTurbulence = document.getElementById('liquid-turbulence');
+  const serviceCards = document.querySelectorAll('.service-card');
+  
+  if (liquidDisplacement && liquidTurbulence && serviceCards.length > 0) {
+    let baseFrequency = { x: 0 };
+    let displacement = { scale: 0 };
+    
+    serviceCards.forEach(card => {
+      const img = card.querySelector('img');
+      if (!img) return;
+      
+      card.addEventListener('mouseenter', () => {
+        img.style.filter = 'url(#liquid) grayscale(0)';
+        
+        gsap.killTweensOf(baseFrequency);
+        gsap.killTweensOf(displacement);
+        
+        baseFrequency.x = 0;
+        displacement.scale = 0;
+        
+        gsap.to(baseFrequency, {
+          x: 0.04,
+          duration: 0.6,
+          ease: "power2.inOut",
+          onUpdate: () => liquidTurbulence.setAttribute('baseFrequency', `${baseFrequency.x} ${baseFrequency.x}`)
+        });
+        
+        gsap.to(displacement, {
+          scale: 40,
+          duration: 0.6,
+          ease: "power2.inOut",
+          onUpdate: () => liquidDisplacement.setAttribute('scale', displacement.scale),
+          onComplete: () => {
+            gsap.to(displacement, {
+              scale: 0,
+              duration: 1,
+              ease: "power3.out",
+              onUpdate: () => liquidDisplacement.setAttribute('scale', displacement.scale)
+            });
+            gsap.to(baseFrequency, {
+              x: 0,
+              duration: 1,
+              ease: "power3.out",
+              onUpdate: () => liquidTurbulence.setAttribute('baseFrequency', `${baseFrequency.x} ${baseFrequency.x}`),
+              onComplete: () => {
+                img.style.filter = 'grayscale(0)'; 
+              }
+            });
+          }
+        });
+      });
+      
+      card.addEventListener('mouseleave', () => {
+        img.style.filter = 'grayscale(1)';
+      });
+    });
+  }
+}
